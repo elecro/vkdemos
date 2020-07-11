@@ -3,6 +3,9 @@
  * The example renders in memory then copies it to a "readable" image and
  * saves the result into a binary PPM image file.
  *
+ * The example does not use any vertex inputs. The triangle is coded into
+ * the vertex shader.
+ *
  * Compile without shaderc:
  * $ g++ vktriangle.cpp -o triangle -lvulkan -std=c++11
  *
