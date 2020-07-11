@@ -3,10 +3,17 @@
  * The example renders in memory then copies it to a "readable" image and
  * saves the result into a binary PPM image file.
  *
- * Compile:
- * $ g++ vktriangle.cpp -o triangle -lvulkan -lshaderc_shared -std=c++11
+ * Compile without shaderc:
+ * $ g++ vktriangle.cpp -o triangle -lvulkan -std=c++11
  *
- * Run: the "triangle.vert" and "passthrough.frag" must be in the same dir.
+ * Re-Compile shaders (optional):
+ * $ glslangValidator -V triangle.vert -o triangle.vert.spv
+ * $ glslangValidator -V passthrough.frag -o passthrough.frag.spv
+ *
+ * Compile with shaderc:
+ * $ g++ vktriangle.cpp -o triangle -lvulkan -lshaderc_shared -std=c++11 -DHAVE_SHADERC=1
+ *
+ * Run: the "triangle.vert*" and "passthrough.frag*" must be in the same dir.
  * $ ./triangle
  *
  * Env variables:
@@ -17,7 +24,9 @@
  *  * C++11
  *  * Vulkan 1.0
  *  * Vulkan loader
- *  * shaderc (SPIRV-tools, GLSLLang)
+ *  * One of the following:
+ *    * glslangValidator (HAVE_SHADERC=0)
+ *    * shaderc with glslang (HAVE_SHADERC=1)
  *
  * Includes:
  *  * Validation layer enable.
@@ -54,7 +63,13 @@
 
 #include <vulkan/vulkan.h>
 
+#ifndef HAVE_SHADERC
+#define HAVE_SHADERC 0
+#endif
+
+#if HAVE_SHADERC
 #include <shaderc/shaderc.hpp>
+#endif
 
 const std::vector<const char*> g_validationLayers = {
     "VK_LAYER_KHRONOS_validation",
@@ -63,8 +78,12 @@ const std::vector<const char*> g_validationLayers = {
 static uint32_t FindQueueFamily(const VkPhysicalDevice device, bool *hasIdx);
 static uint32_t FindMemoryType(const VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties);
 
-static std::vector<char> LoadShader(const char *name);
+#if HAVE_SHADERC
+static std::vector<char> LoadGLSL(const std::string name);
 static std::vector<uint32_t> CompileGLSL(shaderc_shader_kind shaderType, const std::vector<char> &vertSrc);
+#else
+static std::vector<uint32_t> LoadSPIRV(const std::string name);
+#endif
 
 static void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
                                    const VkDevice device,
@@ -91,6 +110,7 @@ int main(int argc, char **argv) {
     }
 
     printf("Validation: %s\n", (enableValidationLayers ? "ON" : "OFF"));
+    printf("Using shaderc: %s\n", (HAVE_SHADERC ? "YES" : "NO"));
     printf("Output: %s\n", outputFileName);
 
     // 1. Create Vulkan Instance.
@@ -388,8 +408,16 @@ int main(int argc, char **argv) {
     VkShaderModule vertShaderModule;
     {
         // 9.1. Load the GLSL shader from file and compile it with shaderc.
-        std::vector<char> vertSrc = LoadShader("triangle.vert");
+        #if HAVE_SHADERC
+        std::vector<char> vertSrc = LoadGLSL("triangle.vert");
         std::vector<uint32_t> vertCode = CompileGLSL(shaderc_vertex_shader, vertSrc);
+        #else
+        std::vector<uint32_t> vertCode = LoadSPIRV("triangle.vert.spv");
+        #endif
+
+        if (vertCode.size() == 0) {
+            throw std::runtime_error("failed to load vertex shader!");
+        }
 
         // 9.2. Specify the vertex shader module information.
         // Notes:
@@ -414,8 +442,16 @@ int main(int argc, char **argv) {
     VkShaderModule fragShaderModule;
     {
         // 10.1. Load the GLSL shader from file and compile it with shaderc.
-        std::vector<char> fragSrc = LoadShader("passthrough.frag");
+        #if HAVE_SHADERC
+        std::vector<char> fragSrc = LoadGLSL("passthrough.frag");
         std::vector<uint32_t> fragCode = CompileGLSL(shaderc_fragment_shader, fragSrc);
+        #else
+        std::vector<uint32_t> fragCode = LoadSPIRV("passthrough.frag.spv");
+        #endif
+
+        if (fragCode.size() == 0) {
+            throw std::runtime_error("failed to load fragment shader!");
+        }
 
         // 10.2. Specify the fragment shader module information.
         VkShaderModuleCreateInfo fragInfo;
@@ -923,8 +959,14 @@ uint32_t FindMemoryType(const VkPhysicalDevice physicalDevice,
     throw std::runtime_error("failed to find suitable memory type!");
 }
 
-std::vector<char> LoadShader(const char *name) {
+#if HAVE_SHADERC
+
+std::vector<char> LoadGLSL(const std::string name) {
     std::ifstream input(name, std::ios::binary);
+
+    if (!input.is_open()) {
+        throw std::runtime_error("failed to open file:" + name);
+    }
 
     return std::vector<char>(std::istreambuf_iterator<char>(input),
                              std::istreambuf_iterator<char>());
@@ -937,6 +979,33 @@ std::vector<uint32_t> CompileGLSL(shaderc_shader_kind shaderType, const std::vec
 
     return { module.begin(), module.end() };
 }
+
+#else
+
+std::vector<uint32_t> LoadSPIRV(const std::string name) {
+    std::ifstream file(name, std::ios::ate | std::ios::binary);
+
+    if (!file.is_open()) {
+        throw std::runtime_error("failed to open file: " + name);
+    }
+
+    size_t fileSize = (size_t) file.tellg();
+
+    if ((fileSize % sizeof(uint32_t)) != 0) {
+        throw std::runtime_error("spirv file is not divisable by 4: " + name);
+    }
+
+    std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
+
+    file.seekg(0);
+    file.read((char*)buffer.data(), fileSize);
+
+    file.close();
+
+    return buffer;
+}
+
+#endif
 
 void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
                             const VkDevice device,
