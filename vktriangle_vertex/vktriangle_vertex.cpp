@@ -3,18 +3,18 @@
  * The example renders in memory then copies it to a "readable" image and
  * saves the result into a binary PPM image file.
  *
- * The example does not use any vertex inputs. The triangle is coded into
- * the vertex shader.
+ * The example uses a single vertex input.
+ * Look for the "V.X." comments to see the vertex input handling ("X" is a number).
  *
  * Compile without shaderc:
- * $ g++ vktriangle.cpp -o triangle -lvulkan -std=c++11
+ * $ g++ vktriangle_vertex.cpp -o triangle_vertex -lvulkan -std=c++11
  *
  * Re-Compile shaders (optional):
- * $ glslangValidator -V triangle.vert -o triangle.vert.spv
+ * $ glslangValidator -V passthrough.vert -o passthrough.vert.spv
  * $ glslangValidator -V passthrough.frag -o passthrough.frag.spv
  *
  * Compile with shaderc:
- * $ g++ vktriangle.cpp -o triangle -lvulkan -lshaderc_shared -std=c++11 -DHAVE_SHADERC=1
+ * $ g++ vktriangle_vertex.cpp -o triangle_vertex -lvulkan -lshaderc_shared -std=c++11 -DHAVE_SHADERC=1
  *
  * Run: the "triangle.vert*" and "passthrough.frag*" must be in the same dir.
  * $ ./triangle
@@ -352,6 +352,95 @@ int main(int argc, char **argv) {
         }
     }
 
+    // V.0. Prepare the Vertex Coordinates.
+    std::vector<float> vertexCoordinates = {
+         0.0, -0.5,
+         0.5,  0.5,
+        -0.5,  0.5
+    };
+
+    // V.1. Create the Vulkan buffer which will hold the Vertex Input data.
+    // This buffer will hold the Vertex coordinates in a vec2 like format.
+    VkBuffer vertexBuffer;
+    {
+        VkBufferCreateInfo bufferInfo;
+        {
+            bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            bufferInfo.pNext = NULL;
+            bufferInfo.flags = 0;
+            bufferInfo.size = sizeof(float) * vertexCoordinates.size();
+            // The buffer will be used as a Vertex Input attribute.
+            bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+            bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            bufferInfo.queueFamilyIndexCount = 0;
+            bufferInfo.pQueueFamilyIndices = NULL;
+        }
+
+        if (vkCreateBuffer(device, &bufferInfo, NULL, &vertexBuffer) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create vertex buffer!");
+        }
+    }
+
+    // V.2. Allocate and bind the memory for the Vertex Buffer.
+    // For each Buffer a memory should be allocated on the GPU otherwise it can't be used.
+    VkDeviceMemory vertexBufferMemory;
+    {
+        // 6.1 Query the memory requirments for the image.
+        VkMemoryRequirements memRequirements;
+        vkGetBufferMemoryRequirements(device, vertexBuffer, &memRequirements);
+
+        // 6.2 Find a memory type based on the requirements.
+        // Here a device (gpu) local memory type is requested (VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT).
+        uint32_t memoryTypeIndex = FindMemoryType(physicalDevice,
+                                                  memRequirements.memoryTypeBits,
+                                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+
+        // 6.3. Based on the memory requirements specify the allocation information.
+        VkMemoryAllocateInfo allocInfo;
+        {
+            allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            allocInfo.pNext = NULL;
+            allocInfo.allocationSize = memRequirements.size;
+            allocInfo.memoryTypeIndex = memoryTypeIndex;
+        }
+
+        // 6.3 Allocate the memory.
+        if (vkAllocateMemory(device, &allocInfo, NULL, &vertexBufferMemory) != VK_SUCCESS) {
+            throw std::runtime_error("failed to allocate image memory!");
+        }
+
+        // 6.4 "Connect" the Vertex buffer with the allocated memory.
+        vkBindBufferMemory(device, vertexBuffer, vertexBufferMemory, 0);
+    }
+
+    // V.3. Upload the Vertex Buffer data.
+    {
+        // V.3.1. Map buffer memory to "data" pointer.
+        void *data;
+        if (vkMapMemory(device, vertexBufferMemory, 0, VK_WHOLE_SIZE, 0, &data) != VK_SUCCESS) {
+            throw std::runtime_error("failed to map vertex buffer!");
+        }
+
+        // V.3.2. Copy data into the "data".
+        ::memcpy(data, vertexCoordinates.data(), sizeof(float) * vertexCoordinates.size());
+
+        // V.3.3. Flush the data.
+        // This is required as a non-coherent buffer was created.
+        VkMappedMemoryRange memoryRange;
+        {
+            memoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+            memoryRange.pNext = NULL;
+            memoryRange.memory = vertexBufferMemory;
+            memoryRange.offset = 0;
+            memoryRange.size = VK_WHOLE_SIZE;
+        }
+        vkFlushMappedMemoryRanges(device, 1, &memoryRange);
+
+        // V.3.4. Unmap the mapped vertex buffer.
+        // After this the "data" pointer is a non-valid pointer.
+        vkUnmapMemory(device, vertexBufferMemory);
+    }
+
     // 8. Create a Render Pass.
     // A Render Pass is required to use vkCmdDraw* commands.
     VkRenderPass renderPass;
@@ -412,10 +501,10 @@ int main(int argc, char **argv) {
     {
         // 9.1. Load the GLSL shader from file and compile it with shaderc.
         #if HAVE_SHADERC
-        std::vector<char> vertSrc = LoadGLSL("triangle.vert");
+        std::vector<char> vertSrc = LoadGLSL("passthrough.vert");
         std::vector<uint32_t> vertCode = CompileGLSL(shaderc_vertex_shader, vertSrc);
         #else
-        std::vector<uint32_t> vertCode = LoadSPIRV("triangle.vert.spv");
+        std::vector<uint32_t> vertCode = LoadSPIRV("passthrough.vert.spv");
         #endif
 
         if (vertCode.size() == 0) {
@@ -518,15 +607,37 @@ int main(int argc, char **argv) {
 
         VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
 
+        // V.4. Describe the Vertex input binding information.
+        VkVertexInputBindingDescription vec2VertexBinding;
+        {
+            // The binding information is mapped to the VkVertexInputAttributeDescription.binding.
+            vec2VertexBinding.binding = 0;
+            // The stride information is based on the vertex input type: vec2. (see shader)
+            vec2VertexBinding.stride = sizeof(float) * 2;
+            vec2VertexBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        }
+
+        // V.5. Describe the Vertex input attribute information.
+        VkVertexInputAttributeDescription positionVertexAttribute;
+        {
+            positionVertexAttribute.binding = 0;
+            // The attribute location is from the Vertex shader.
+            positionVertexAttribute.location = 0;
+            // Format and offset is used during the data read from the buffer.
+            positionVertexAttribute.format = VK_FORMAT_R32G32_SFLOAT;
+            positionVertexAttribute.offset = 0;
+        }
+
+        // V.6. Connect the Attribute and Binding infors to the VertexInputState.
         VkPipelineVertexInputStateCreateInfo vertexInputInfo;
         {
             vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
             vertexInputInfo.pNext = NULL;
             vertexInputInfo.flags = 0;
-            vertexInputInfo.vertexBindingDescriptionCount = 0;
-            vertexInputInfo.pVertexBindingDescriptions = NULL;
-            vertexInputInfo.vertexAttributeDescriptionCount = 0;
-            vertexInputInfo.pVertexAttributeDescriptions = NULL;
+            vertexInputInfo.vertexBindingDescriptionCount = 1;
+            vertexInputInfo.pVertexBindingDescriptions = &vec2VertexBinding;
+            vertexInputInfo.vertexAttributeDescriptionCount = 1;
+            vertexInputInfo.pVertexAttributeDescriptions = &positionVertexAttribute;
         }
 
         VkPipelineInputAssemblyStateCreateInfo inputAssembly;
@@ -746,6 +857,10 @@ int main(int argc, char **argv) {
         // 17.2. Bind the Graphics pipeline inside the Current Render Pass.
         vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
+        // V.7. Bind the Vertex buffers as specified by the pipeline.
+        VkDeviceSize bufferOffsets[] = { 0 };
+        vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &vertexBuffer, bufferOffsets);
+
         // 17.3. Add a Draw command.
         // Draw 3 vertices using the pipeline bound previously.
         uint32_t vertexCount = 3;
@@ -900,6 +1015,12 @@ int main(int argc, char **argv) {
 
     // XX. Destory Render Pass.
     vkDestroyRenderPass(device, renderPass, NULL);
+
+    // XX. Free the Vertex Buffer's memory.
+    vkFreeMemory(device, vertexBufferMemory, NULL);
+
+    // XX. Destroy the Vertex Buffer.
+    vkDestroyBuffer(device, vertexBuffer, NULL);
 
     // XX. Destroy render target image view.
     vkDestroyImageView(device, renderImageView, NULL);
