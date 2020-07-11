@@ -479,7 +479,7 @@ int main(int argc, char **argv) {
 
         VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
 
-        VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+        VkPipelineVertexInputStateCreateInfo vertexInputInfo;
         {
             vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
             vertexInputInfo.pNext = NULL;
@@ -490,14 +490,16 @@ int main(int argc, char **argv) {
             vertexInputInfo.pVertexAttributeDescriptions = NULL;
         }
 
-        VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly;
         {
             inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+            inputAssembly.pNext = NULL;
+            inputAssembly.flags = 0;
             inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
             inputAssembly.primitiveRestartEnable = VK_FALSE;
         }
 
-        VkViewport viewport{};
+        VkViewport viewport;
         {
             viewport.x = 0.0f;
             viewport.y = 0.0f;
@@ -507,7 +509,7 @@ int main(int argc, char **argv) {
             viewport.maxDepth = 1.0f;
         }
 
-        VkRect2D scissor{};
+        VkRect2D scissor;
         {
             scissor.offset = { 0, 0 };
             scissor.extent = { (uint32_t)viewport.width, (uint32_t)viewport.height };
@@ -522,37 +524,56 @@ int main(int argc, char **argv) {
             viewportState.pScissors = &scissor;
         }
 
-        VkPipelineRasterizationStateCreateInfo rasterizer{};
+        VkPipelineRasterizationStateCreateInfo rasterizer;
         {
             rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+            rasterizer.pNext = NULL;
+            rasterizer.flags = 0;
             rasterizer.depthClampEnable = VK_FALSE;
             rasterizer.rasterizerDiscardEnable = VK_FALSE;
             rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-            rasterizer.lineWidth = 1.0f;
             rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
             rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
             rasterizer.depthBiasEnable = VK_FALSE;
+            rasterizer.depthBiasConstantFactor = 0.0;
+            rasterizer.depthBiasClamp = 0.0;
+            rasterizer.depthBiasSlopeFactor = 0.0;
+            rasterizer.lineWidth = 1.0f;
         }
 
-        VkPipelineMultisampleStateCreateInfo multisampling{};
+        VkPipelineMultisampleStateCreateInfo multisampling;
         {
             multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-            multisampling.sampleShadingEnable = VK_FALSE;
+            multisampling.pNext = NULL;
+            multisampling.flags = 0;
             multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+            multisampling.sampleShadingEnable = VK_FALSE;
+            multisampling.minSampleShading = 0.0;
+            multisampling.pSampleMask = NULL;
+            multisampling.alphaToCoverageEnable = VK_FALSE;
+            multisampling.alphaToOneEnable = VK_FALSE;
         }
 
-        VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+        VkPipelineColorBlendAttachmentState colorBlendAttachment;
         {
+            colorBlendAttachment.blendEnable = VK_FALSE;
+            colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+            colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+            colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+            colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
             colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT
                                                   | VK_COLOR_COMPONENT_G_BIT
                                                   | VK_COLOR_COMPONENT_B_BIT
                                                   | VK_COLOR_COMPONENT_A_BIT;
-            colorBlendAttachment.blendEnable = VK_FALSE;
         }
 
-        VkPipelineColorBlendStateCreateInfo colorBlending{};
+        VkPipelineColorBlendStateCreateInfo colorBlending;
         {
             colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+            colorBlending.pNext = NULL;
+            colorBlending.flags = 0;
             colorBlending.logicOpEnable = VK_FALSE;
             colorBlending.logicOp = VK_LOGIC_OP_COPY;
             colorBlending.attachmentCount = 1;
@@ -563,21 +584,27 @@ int main(int argc, char **argv) {
             colorBlending.blendConstants[3] = 0.0f;
         }
 
-        VkGraphicsPipelineCreateInfo pipelineInfo{};
+        VkGraphicsPipelineCreateInfo pipelineInfo;
         {
             pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+            pipelineInfo.pNext = NULL;
+            pipelineInfo.flags = 0;
             pipelineInfo.stageCount = 2;
             pipelineInfo.pStages = shaderStages;
             pipelineInfo.pVertexInputState = &vertexInputInfo;
             pipelineInfo.pInputAssemblyState = &inputAssembly;
+            pipelineInfo.pTessellationState = NULL;
             pipelineInfo.pViewportState = &viewportState;
             pipelineInfo.pRasterizationState = &rasterizer;
             pipelineInfo.pMultisampleState = &multisampling;
+            pipelineInfo.pDepthStencilState = NULL;
             pipelineInfo.pColorBlendState = &colorBlending;
+            pipelineInfo.pDynamicState = NULL;
             pipelineInfo.layout = pipelineLayout;
             pipelineInfo.renderPass = renderPass;
             pipelineInfo.subpass = 0;
             pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
+            pipelineInfo.basePipelineIndex = 0;
         }
 
         if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &pipeline) != VK_SUCCESS) {
@@ -589,7 +616,7 @@ int main(int argc, char **argv) {
     // Frame buffer is the render target.
     VkFramebuffer framebuffer;
     {
-        VkFramebufferCreateInfo framebufferInfo{};
+        VkFramebufferCreateInfo framebufferInfo;
         {
             framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
             framebufferInfo.pNext = NULL;
@@ -627,7 +654,7 @@ int main(int argc, char **argv) {
     // 15. Create Command Buffer to record draw commands.
     VkCommandBuffer cmdBuffer;
     {
-        VkCommandBufferAllocateInfo allocInfo{};
+        VkCommandBufferAllocateInfo allocInfo;
         {
             allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
             allocInfo.pNext = NULL;
@@ -663,9 +690,10 @@ int main(int argc, char **argv) {
         // 17.1. Add Begin RenderPass command
         // This makes it possible to use the vmCmdDraw* calls.
         VkClearValue clearColor = { { { 0.0f, 0.0f, 0.0f, 1.0f } } };
-        VkRenderPassBeginInfo renderPassInfo{};
+        VkRenderPassBeginInfo renderPassInfo;
         {
             renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            renderPassInfo.pNext = NULL;
             renderPassInfo.renderPass = renderPass;
             renderPassInfo.framebuffer = framebuffer;
             renderPassInfo.renderArea.offset = { 0, 0 };
@@ -721,16 +749,17 @@ int main(int argc, char **argv) {
 
     // 20. Submit the recorded Command Buffer to the Queue.
     {
-        VkSubmitInfo submitInfo{};
+        VkSubmitInfo submitInfo;
         {
             submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submitInfo.pNext = NULL;
             submitInfo.waitSemaphoreCount = 0;
-            submitInfo.pWaitSemaphores = nullptr;
-            submitInfo.pWaitDstStageMask = nullptr;
+            submitInfo.pWaitSemaphores = NULL;
+            submitInfo.pWaitDstStageMask = NULL;
             submitInfo.commandBufferCount = 1;
             submitInfo.pCommandBuffers = &cmdBuffer;
             submitInfo.signalSemaphoreCount = 0;
-            submitInfo.pSignalSemaphores = nullptr;
+            submitInfo.pSignalSemaphores = NULL;
         }
 
         // A fence is provided to have a CPU side sync point.
@@ -759,7 +788,12 @@ int main(int argc, char **argv) {
         CopyImageToLinearImage(physicalDevice, device, queue, cmdPool, renderImage, renderImageWidth, renderImageHeight, &readableImage, &readableImageMemory);
 
         // 23. Get layout of the readable image (including row pitch).
-        VkImageSubresource subResource { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0 };
+        VkImageSubresource subResource;
+        {
+            subResource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            subResource.mipLevel = 0;
+            subResource.arrayLayer = 0;
+        }
         VkSubresourceLayout subResourceLayout;
         vkGetImageSubresourceLayout(device, readableImage, &subResource, &subResourceLayout);
 
@@ -919,9 +953,10 @@ void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
     VkFormat readableImageFormat = VK_FORMAT_R8G8B8A8_UNORM;
     VkImage readableImage;
     {
-        VkImageCreateInfo imageInfo{};
+        VkImageCreateInfo imageInfo;
         {
             imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+            imageInfo.pNext = NULL;
             imageInfo.flags = 0;
             imageInfo.imageType = VK_IMAGE_TYPE_2D;
             imageInfo.format = readableImageFormat;
@@ -935,6 +970,8 @@ void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
             imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
             imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            imageInfo.queueFamilyIndexCount = 0;
+            imageInfo.pQueueFamilyIndices = NULL;
         }
 
         if (vkCreateImage(device, &imageInfo, NULL, &readableImage) != VK_SUCCESS) {
@@ -954,7 +991,7 @@ void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
         // A.2.2 Find a memory type based on the requirements.
         // Here a memory which is mappable is requested.
         uint32_t memoryTypeIndex = FindMemoryType(physicalDevice, memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-        VkMemoryAllocateInfo allocInfo{};
+        VkMemoryAllocateInfo allocInfo;
         {
             allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
             allocInfo.pNext = NULL;
@@ -976,7 +1013,7 @@ void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
     // A.3. Create Command Buffer to record image copy operations.
     VkCommandBuffer cmdBuffer;
     {
-        VkCommandBufferAllocateInfo allocInfo{};
+        VkCommandBufferAllocateInfo allocInfo;
         {
             allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
             allocInfo.pNext = NULL;
@@ -1009,7 +1046,7 @@ void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
 
     // A.4. Transition destination image to transfer destination layout.
     {
-        VkImageMemoryBarrier imageMemoryBarrier{};
+        VkImageMemoryBarrier imageMemoryBarrier;
         {
             imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
             imageMemoryBarrier.pNext = NULL;
@@ -1017,6 +1054,8 @@ void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
             imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
             imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            imageMemoryBarrier.srcQueueFamilyIndex = 0;
+            imageMemoryBarrier.dstQueueFamilyIndex = 0;
             imageMemoryBarrier.image = readableImage;
             imageMemoryBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
         }
@@ -1026,7 +1065,7 @@ void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
 
     // A.5. Transition source image to transfer source layout
     {
-        VkImageMemoryBarrier imageMemoryBarrier{};
+        VkImageMemoryBarrier imageMemoryBarrier;
         {
             imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
             imageMemoryBarrier.pNext = NULL;
@@ -1034,6 +1073,8 @@ void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
             imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
             imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            imageMemoryBarrier.srcQueueFamilyIndex = 0;
+            imageMemoryBarrier.dstQueueFamilyIndex = 0;
             imageMemoryBarrier.image = inputImage;
             imageMemoryBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
         }
@@ -1044,12 +1085,14 @@ void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
     // A.6. Add image copy command.
     {
         // Note: requires us to manually flip components
-        VkImageCopy imageCopyRegion{};
+        VkImageCopy imageCopyRegion;
         {
             imageCopyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
             imageCopyRegion.srcSubresource.layerCount = 1;
+            imageCopyRegion.srcOffset = { 0, 0, 0 };
             imageCopyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
             imageCopyRegion.dstSubresource.layerCount = 1;
+            imageCopyRegion.dstOffset = { 0, 0, 0 };
             imageCopyRegion.extent.width = inputImageWidth;
             imageCopyRegion.extent.height = inputImageHeight;
             imageCopyRegion.extent.depth = 1;
@@ -1065,7 +1108,7 @@ void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
 
     // A.7. Transition destination image to general layout, which is the required layout for mapping the image memory later on.
     {
-        VkImageMemoryBarrier imageMemoryBarrier{};
+        VkImageMemoryBarrier imageMemoryBarrier;
         {
             imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
             imageMemoryBarrier.pNext = NULL;
@@ -1073,6 +1116,8 @@ void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
             imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
             imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
             imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+            imageMemoryBarrier.srcQueueFamilyIndex = 0;
+            imageMemoryBarrier.dstQueueFamilyIndex = 0;
             imageMemoryBarrier.image = readableImage;
             imageMemoryBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
         }
@@ -1106,9 +1151,10 @@ void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
 
     // A.10. Submit the recorded Command Buffer to the Queue.
     {
-        VkSubmitInfo submitInfo{};
+        VkSubmitInfo submitInfo;
         {
             submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submitInfo.pNext = NULL;
             submitInfo.waitSemaphoreCount = 0;
             submitInfo.pWaitSemaphores = NULL;
             submitInfo.pWaitDstStageMask = NULL;
