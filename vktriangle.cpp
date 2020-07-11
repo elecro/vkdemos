@@ -641,7 +641,7 @@ int main(int argc, char **argv) {
         VkCommandPoolCreateInfo poolInfo;
         {
             poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-            poolInfo.pNext = 0;
+            poolInfo.pNext = NULL;
             poolInfo.flags = 0;
             poolInfo.queueFamilyIndex = graphicsQueueFamilyIdx;
         }
@@ -960,18 +960,16 @@ void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
             imageInfo.flags = 0;
             imageInfo.imageType = VK_IMAGE_TYPE_2D;
             imageInfo.format = readableImageFormat;
-            imageInfo.extent.width = inputImageWidth;
-            imageInfo.extent.height = inputImageHeight;
-            imageInfo.extent.depth = 1;
+            imageInfo.extent = { (uint32_t)inputImageWidth, (uint32_t)inputImageHeight, 1 };
             imageInfo.mipLevels = 1;
             imageInfo.arrayLayers = 1;
             imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
             imageInfo.tiling = VK_IMAGE_TILING_LINEAR;
             imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-            imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
             imageInfo.queueFamilyIndexCount = 0;
             imageInfo.pQueueFamilyIndices = NULL;
+            imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         }
 
         if (vkCreateImage(device, &imageInfo, NULL, &readableImage) != VK_SUCCESS) {
@@ -1088,9 +1086,13 @@ void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
         VkImageCopy imageCopyRegion;
         {
             imageCopyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            imageCopyRegion.srcSubresource.mipLevel = 0;
+            imageCopyRegion.srcSubresource.baseArrayLayer = 0;
             imageCopyRegion.srcSubresource.layerCount = 1;
             imageCopyRegion.srcOffset = { 0, 0, 0 };
             imageCopyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            imageCopyRegion.dstSubresource.mipLevel = 0;
+            imageCopyRegion.dstSubresource.baseArrayLayer = 0;
             imageCopyRegion.dstSubresource.layerCount = 1;
             imageCopyRegion.dstOffset = { 0, 0, 0 };
             imageCopyRegion.extent.width = inputImageWidth;
