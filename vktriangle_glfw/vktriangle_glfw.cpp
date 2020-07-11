@@ -1,5 +1,5 @@
 /**
- * Single file Vulkan triangle example with minimal "helper" methods.
+ * Single file Vulkan triangle example with GLFW.
  * The example renders in memory then copies it to a "readable" image and
  * saves the result into a binary PPM image file.
  *
@@ -7,17 +7,17 @@
  * Look for the "V.X." comments to see the vertex input handling ("X" is a number).
  *
  * Compile without shaderc:
- * $ g++ vktriangle_vertex.cpp -o triangle_vertex -lvulkan -std=c++11
+ * $ g++ vktriangle_glfw.cpp -o triangle_glfw -lvulkan -lglfw -std=c++11
  *
  * Re-Compile shaders (optional):
  * $ glslangValidator -V passthrough.vert -o passthrough.vert.spv
  * $ glslangValidator -V passthrough.frag -o passthrough.frag.spv
  *
  * Compile with shaderc:
- * $ g++ vktriangle_vertex.cpp -o triangle_vertex -lvulkan -lshaderc_shared -std=c++11 -DHAVE_SHADERC=1
+ * $ g++ vktriangle_glfw.cpp -o triangle_glfw -lvulkan -lglfw -lshaderc_shared -std=c++11 -DHAVE_SHADERC=1
  *
  * Run: the "passthrough.{vert,frag}*" files must be in the same dir.
- * $ ./triangle_vertex
+ * $ ./triangle_glfw
  *
  * Env variables:
  * DEMO_USE_VALIDATION: Enables (1) or disables (0) the usage of validation layers. Default: 0
@@ -27,6 +27,7 @@
  *  * C++11
  *  * Vulkan 1.0
  *  * Vulkan loader
+ *  * GLFW
  *  * One of the following:
  *    * glslangValidator (HAVE_SHADERC=0)
  *    * shaderc with glslang (HAVE_SHADERC=1)
@@ -63,8 +64,11 @@
 #include <cstring>
 #include <stdexcept>
 #include <vector>
+#include <unistd.h>
 
 #include <vulkan/vulkan.h>
+
+#include <GLFW/glfw3.h>
 
 #ifndef HAVE_SHADERC
 #define HAVE_SHADERC 0
@@ -78,7 +82,11 @@ const std::vector<const char*> g_validationLayers = {
     "VK_LAYER_KHRONOS_validation",
 };
 
-static uint32_t FindQueueFamily(const VkPhysicalDevice device, bool *hasIdx);
+const std::vector<const char*> g_swapchainDeviceExtension = {
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+};
+
+static uint32_t FindQueueFamily(const VkPhysicalDevice device, const VkSurfaceKHR surface, bool *hasIdx);
 static uint32_t FindMemoryType(const VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties);
 
 #if HAVE_SHADERC
@@ -116,12 +124,37 @@ int main(int argc, char **argv) {
     printf("Using shaderc: %s\n", (HAVE_SHADERC ? "YES" : "NO"));
     printf("Output: %s\n", outputFileName);
 
+    // G.0. Initialize GLFW.
+    {
+        glfwInit();
+
+        printf("GLFW Vulkan supported: %s\n", (glfwVulkanSupported() ? "YES" : "NO"));
+    }
+
+    // G.1. Create a Window.
+    GLFWwindow* window;
+    {
+        // With GLFW_CLIENT_API set to GLFW_NO_API there will be no OpenGL (ES) context.
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+
+        window = glfwCreateWindow(512, 512, "vktriangle GLFW", NULL, NULL);
+    }
+
     // 1. Create Vulkan Instance.
     // A Vulkan instance is the base for all other Vulkan API calls.
     // This is similar an the OpenGL context.
     VkInstance instance;
     {
         std::vector<const char*> extensions{};
+
+        // G.2. Add VK_KHR_surface extensions for the instance creation.
+        // With this a presentation surface can be accessed.
+        uint32_t count;
+        const char** surfaceExtensions = glfwGetRequiredInstanceExtensions(&count);
+        for (uint32_t idx = 0; idx < count; idx++) {
+            extensions.push_back(surfaceExtensions[idx]);
+        }
 
         // 1.1. Specify the application infromation.
         // One important info is the "apiVersion"
@@ -165,6 +198,15 @@ int main(int argc, char **argv) {
         }
     }
 
+    // G.3. Create a Vulkan Surface using GLFW.
+    // By using GLFW the current windowing system's surface is created (xcb, win32, etc..)
+    VkSurfaceKHR surface;
+    {
+        if (glfwCreateWindowSurface(instance, window, NULL, &surface) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create window surface!");
+        }
+    }
+
     // 2. Select PhysicalDevice and Queue Family Index.
     VkPhysicalDevice physicalDevice;
     uint32_t graphicsQueueFamilyIdx;
@@ -185,7 +227,7 @@ int main(int argc, char **argv) {
         // Currently the first physical device is selected if it supports Graphics Queue.
         for (const VkPhysicalDevice& device : devices) {
             bool hasIdx;
-            graphicsQueueFamilyIdx = FindQueueFamily(device, &hasIdx);
+            graphicsQueueFamilyIdx = FindQueueFamily(device, surface, &hasIdx);
             if (hasIdx) {
                 physicalDevice = device;
                 break;
@@ -217,6 +259,8 @@ int main(int argc, char **argv) {
         // 3.2. The queue family/families must be provided to allow the device to use them.
         std::vector<uint32_t> uniqueQueueFamilies = { graphicsQueueFamilyIdx };
 
+        // G.X. TODO: add device swapchane extension check.
+
         // 3.3. Specify the device creation information.
         VkDeviceCreateInfo createInfo;
         {
@@ -226,8 +270,9 @@ int main(int argc, char **argv) {
             createInfo.queueCreateInfoCount = 1;
             createInfo.pQueueCreateInfos = &queueCreateInfo;
             createInfo.pEnabledFeatures = NULL;
-            createInfo.enabledExtensionCount = 0;
-            createInfo.ppEnabledExtensionNames = NULL;
+            // G.4. Specify the swapchain extension when creating a VkDevice.
+            createInfo.enabledExtensionCount = (uint32_t)g_swapchainDeviceExtension.size();
+            createInfo.ppEnabledExtensionNames = g_swapchainDeviceExtension.data();
             createInfo.enabledLayerCount = 0;
 
             if (enableValidationLayers) {
@@ -250,91 +295,115 @@ int main(int argc, char **argv) {
         vkGetDeviceQueue(device, graphicsQueueFamilyIdx, 0, &queue);
     }
 
-    // 5. Create a 256x256 2D Image to draw onto.
-    // This will be the render target image.
-    // Note: An Image by itself does not allocate memory on the GPU.
-    uint32_t renderImageWidth = 256;
-    uint32_t renderImageHeight = 256;
-    VkFormat renderImageFormat = VK_FORMAT_R8G8B8A8_UNORM;
-    VkImage renderImage;
+    // G.5. Create the Swapchain.
+    // Creating a correct Swapchain requires querying a few things.
+    // Like: surface format, max/min size, presentation mode.
+    VkSurfaceFormatKHR surfaceFormat;
+    // By standard the FIFO presentation mode should always be available.
+    VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
+    VkExtent2D swapExtent;
+
+    VkSwapchainKHR swapchain;
     {
-        // 5.1. Specify the image creation information.
-        VkImageCreateInfo imageInfo;
+        // G.5.1. Query the surface capabilities and select the swapchain's extent (width, height).
+        VkSurfaceCapabilitiesKHR surfaceCapabilities;
         {
-            imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-            imageInfo.pNext = NULL;
-            imageInfo.flags = 0;
-            imageInfo.imageType = VK_IMAGE_TYPE_2D;
-            imageInfo.format = renderImageFormat;
-            imageInfo.extent = { renderImageWidth, renderImageHeight,  1 };
-            imageInfo.mipLevels = 1;
-            imageInfo.arrayLayers = 1;
-            imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-            // Tiling optimal means that the image is in a GPU optimal mode.
-            // Usually this means that it should not be accessed from the CPU side directly as
-            // the image color channels can be in any order.
-            imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-            // Specifying the usage is important:
-            // * VK_IMAGE_USAGE_TRANSFER_SRC_BIT: the image can be used as a source for a transfer/copy operation.
-            // * VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT: the image can be used as a color attachment (aka can render on it).
-            imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; // | VK_IMAGE_USAGE_SAMPLED_BIT;
-            imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-            imageInfo.queueFamilyIndexCount = 0;
-            imageInfo.pQueueFamilyIndices = NULL;
-            imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCapabilities);
+
+            if (surfaceCapabilities.currentExtent.width == UINT32_MAX) {
+                throw std::runtime_error("surface current extent is special, handling int is not implemented!");
+            }
+
+            swapExtent = surfaceCapabilities.currentExtent;
         }
 
-        // 5.2. Create the image.
-        if (vkCreateImage(device, &imageInfo, NULL, &renderImage) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create 2D image!");
+        // G.5.2. Select a surface format.
+        {
+            uint32_t formatCount;
+            vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, NULL);
+
+            std::vector<VkSurfaceFormatKHR> surfaceFormats;
+            surfaceFormats.resize(formatCount);
+            vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, surfaceFormats.data());
+
+            for (VkSurfaceFormatKHR &entry : surfaceFormats) {
+                if ((entry.format == VK_FORMAT_B8G8R8A8_SRGB) && (entry.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)) {
+                    surfaceFormat = entry;
+                    break;
+                }
+            }
+        }
+
+        // G.5.3. TODO: Select a presentation mode, if the FIFO is not good.
+        /*
+        {
+            uint32_t presentModeCount;
+            vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, NULL);
+
+            std::vector<VkPresentModeKHR> presentModes;
+            presentModes.resize(presentModeCount);
+            vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, presentModes.data());
+        }
+        */
+
+        // G.5.4. Specify the number of images in the swap chain.
+        // For better performance using "min + 1";
+        uint32_t imageCount = surfaceCapabilities.minImageCount + 1;
+        VkSwapchainCreateInfoKHR createInfo;
+        {
+            createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+            createInfo.pNext = NULL;
+            createInfo.flags = 0;
+            createInfo.surface = surface;
+            createInfo.minImageCount = imageCount;
+            createInfo.imageFormat = surfaceFormat.format;
+            createInfo.imageColorSpace = surfaceFormat.colorSpace;
+            createInfo.imageExtent = swapExtent;
+            createInfo.imageArrayLayers = 1;
+            createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+            // If the graphics and presentation queue is different this should not be exclusive.
+            createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            createInfo.queueFamilyIndexCount = 0;
+            createInfo.pQueueFamilyIndices = NULL;
+            createInfo.preTransform = surfaceCapabilities.currentTransform;
+            createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+            createInfo.presentMode = swapchainPresentMode;
+            createInfo.clipped = VK_TRUE;
+            createInfo.oldSwapchain = VK_NULL_HANDLE;
+        }
+
+        if (vkCreateSwapchainKHR(device, &createInfo, NULL, &swapchain) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create swap chain!");
         }
     }
 
-    // 6. Allocate and bind the memory for the render target image.
-    // For each Image (or Buffer) a memory should be allocated on the GPU otherwise it can't be used.
-    VkDeviceMemory renderImageMemory;
+    // G.6. Get the Swapchain images.
+    std::vector<VkImage> swapImages;
     {
-        // 6.1 Query the memory requirments for the image.
-        VkMemoryRequirements memRequirements;
-        vkGetImageMemoryRequirements(device, renderImage, &memRequirements);
-
-        // 6.2 Find a memory type based on the requirements.
-        // Here a device (gpu) local memory type is requested (VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT).
-        uint32_t memoryTypeIndex = FindMemoryType(physicalDevice,
-                                                  memRequirements.memoryTypeBits,
-                                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-        // 6.3. Based on the memory requirements specify the allocation information.
-        VkMemoryAllocateInfo allocInfo;
-        {
-            allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-            allocInfo.pNext = NULL;
-            allocInfo.allocationSize = memRequirements.size;
-            allocInfo.memoryTypeIndex = memoryTypeIndex;
-        }
-
-        // 6.3 Allocate the memory.
-        if (vkAllocateMemory(device, &allocInfo, NULL, &renderImageMemory) != VK_SUCCESS) {
-            throw std::runtime_error("failed to allocate image memory!");
-        }
-
-        // 6.4 "Connect" the image with the allocated memory.
-        vkBindImageMemory(device, renderImage, renderImageMemory, 0);
+        uint32_t imageCount;
+        vkGetSwapchainImagesKHR(device, swapchain, &imageCount, NULL);
+        swapImages.resize(imageCount);
+        vkGetSwapchainImagesKHR(device, swapchain, &imageCount, swapImages.data());
     }
 
-    // 7. Create an Image View for the Render Target Image.
-    // Will be used by the Framebuffer as Color Attachment.
-    VkImageView renderImageView;
+    // Old 5. and 6. steps are removed.
+    // The Swapchain creation takes care of the render target image creation.
+    uint32_t renderImageWidth = swapExtent.width;
+    uint32_t renderImageHeight = swapExtent.height;
+
+    // G.7. Create Image Views for the Swapchain Images.
+    // This replaces the old 7. step.
+    std::vector<VkImageView> swapImageViews;
+    swapImageViews.resize(swapImages.size());
     {
-        // 7.1. Specify the view information.
         VkImageViewCreateInfo createInfo;
         {
             createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
             createInfo.pNext = NULL;
             createInfo.flags = 0;
-            createInfo.image = renderImage;
+            //createInfo.image = renderImage;
             createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            createInfo.format = renderImageFormat;
+            createInfo.format = surfaceFormat.format;
             createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
             createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
             createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -346,9 +415,12 @@ int main(int argc, char **argv) {
             createInfo.subresourceRange.layerCount = 1;
         }
 
-        // 7.2. Create the Image View.
-        if (vkCreateImageView(device, &createInfo, NULL, &renderImageView) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create image views!");
+        for (size_t idx = 0; idx < swapImages.size(); idx++) {
+            createInfo.image = swapImages[idx];
+
+            if (vkCreateImageView(device, &createInfo, NULL, &swapImageViews[idx]) != VK_SUCCESS) {
+                throw std::runtime_error("failed to create image views!");
+            }
         }
     }
 
@@ -448,14 +520,15 @@ int main(int argc, char **argv) {
         VkAttachmentDescription colorAttachment;
         {
             colorAttachment.flags = 0;
-            colorAttachment.format = renderImageFormat;
+            colorAttachment.format = surfaceFormat.format;
             colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
             colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
             colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
             colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
             colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            // G.XX. To present an image to a surface the layout should be in VK_IMAGE_LAYOUT_PRESENT_SRC_KHR.
+            colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; //VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         }
 
         VkAttachmentReference colorAttachmentRef;
@@ -653,8 +726,8 @@ int main(int argc, char **argv) {
         {
             viewport.x = 0.0f;
             viewport.y = 0.0f;
-            viewport.width = (float) renderImageWidth;
-            viewport.height = (float) renderImageHeight;
+            viewport.width = (float) swapExtent.width;
+            viewport.height = (float) swapExtent.height;
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
         }
@@ -662,7 +735,7 @@ int main(int argc, char **argv) {
         VkRect2D scissor;
         {
             scissor.offset = { 0, 0 };
-            scissor.extent = { (uint32_t)viewport.width, (uint32_t)viewport.height };
+            scissor.extent = swapExtent;
         }
 
         VkPipelineViewportStateCreateInfo viewportState{};
@@ -762,10 +835,12 @@ int main(int argc, char **argv) {
         }
     }
 
-    // 13. Create Framebuffer.
-    // Frame buffer is the render target.
-    VkFramebuffer framebuffer;
+    // G.8. Create Frambuffer for each Swapchain Image view.
+    // Replaces old 13. step.
+    std::vector<VkFramebuffer> framebuffers;
     {
+        framebuffers.resize(swapImageViews.size());
+
         VkFramebufferCreateInfo framebufferInfo;
         {
             framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -773,14 +848,18 @@ int main(int argc, char **argv) {
             framebufferInfo.flags = 0;
             framebufferInfo.renderPass = renderPass;
             framebufferInfo.attachmentCount = 1;
-            framebufferInfo.pAttachments = &renderImageView;
-            framebufferInfo.width = renderImageWidth;
-            framebufferInfo.height = renderImageHeight;
+            //framebufferInfo.pAttachments = &renderImageView;
+            framebufferInfo.width = swapExtent.width;
+            framebufferInfo.height = swapExtent.height;
             framebufferInfo.layers = 1;
         }
 
-        if (vkCreateFramebuffer(device, &framebufferInfo, NULL, &framebuffer) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create framebuffer!");
+        for (size_t idx = 0; idx < framebuffers.size(); idx++) {
+            framebufferInfo.pAttachments = &swapImageViews[idx];
+
+            if (vkCreateFramebuffer(device, &framebufferInfo, NULL, &framebuffers[idx]) != VK_SUCCESS) {
+                throw std::runtime_error("failed to create framebuffer!");
+            }
         }
     }
 
@@ -801,41 +880,50 @@ int main(int argc, char **argv) {
         }
     }
 
-    // 15. Create Command Buffer to record draw commands.
-    VkCommandBuffer cmdBuffer;
+    // G.9. Create a Command Buffer for each Swapchain Image View (Framebuffer).
+    std::vector<VkCommandBuffer> cmdBuffers;
     {
+        cmdBuffers.resize(swapImageViews.size());
+
         VkCommandBufferAllocateInfo allocInfo;
         {
             allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
             allocInfo.pNext = NULL;
             allocInfo.commandPool = cmdPool;
             allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-            allocInfo.commandBufferCount = 1;
+            allocInfo.commandBufferCount = cmdBuffers.size();
         }
 
-        if (vkAllocateCommandBuffers(device, &allocInfo, &cmdBuffer) != VK_SUCCESS) {
+        if (vkAllocateCommandBuffers(device, &allocInfo, cmdBuffers.data()) != VK_SUCCESS) {
             throw std::runtime_error("failed to allocate command buffers!");
         }
     }
 
     // Start recording draw commands.
+    // G.10. In the current example all Command Buffers will have the same data.
 
     // 16. Start Command Buffer
+    // G.11. Start all Command Buffers.
+    for (size_t idx = 0; idx < cmdBuffers.size(); idx++)
     {
         VkCommandBufferBeginInfo beginInfo;
         {
             beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
             beginInfo.pNext = NULL;
-            beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            // G.XX. As a command buffer is submitted multiple times the VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT flag
+            // can't be used.
+            beginInfo.flags = 0;
             beginInfo.pInheritanceInfo = NULL;
         }
 
-        if (vkBeginCommandBuffer(cmdBuffer, &beginInfo) != VK_SUCCESS) {
+        if (vkBeginCommandBuffer(cmdBuffers[idx], &beginInfo) != VK_SUCCESS) {
             throw std::runtime_error("failed to begin recording command buffer!");
         }
     }
 
     // 17. Insert draw commands into Command Buffer.
+    // G.12. Insert same draw commands into all Command Buffers.
+    for (size_t idx = 0; idx < cmdBuffers.size(); idx++)
     {
         // 17.1. Add Begin RenderPass command
         // This makes it possible to use the vmCmdDraw* calls.
@@ -845,35 +933,40 @@ int main(int argc, char **argv) {
             renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
             renderPassInfo.pNext = NULL;
             renderPassInfo.renderPass = renderPass;
-            renderPassInfo.framebuffer = framebuffer;
+            // G.12.1. Each Command Buffer will use a different Framebuffer
+            renderPassInfo.framebuffer = framebuffers[idx];
             renderPassInfo.renderArea.offset = { 0, 0 };
             renderPassInfo.renderArea.extent = { (uint32_t)renderImageWidth, (uint32_t)renderImageHeight };
             renderPassInfo.clearValueCount = 1;
             renderPassInfo.pClearValues = &clearColor;
         }
 
-        vkCmdBeginRenderPass(cmdBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBeginRenderPass(cmdBuffers[idx], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
         // 17.2. Bind the Graphics pipeline inside the Current Render Pass.
-        vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        vkCmdBindPipeline(cmdBuffers[idx], VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
         // V.7. Bind the Vertex buffers as specified by the pipeline.
         VkDeviceSize bufferOffsets[] = { 0 };
-        vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &vertexBuffer, bufferOffsets);
+        vkCmdBindVertexBuffers(cmdBuffers[idx], 0, 1, &vertexBuffer, bufferOffsets);
 
         // 17.3. Add a Draw command.
         // Draw 3 vertices using the pipeline bound previously.
         uint32_t vertexCount = 3;
         uint32_t instanceCount = 1;
-        vkCmdDraw(cmdBuffer, vertexCount, instanceCount, 0, 0);
+        // G.XX. Each Command buffer uses a different starting Instance Index (idx).
+        // This will be used in the shader to provide a bit of animation.
+        vkCmdDraw(cmdBuffers[idx], vertexCount, instanceCount, 0, idx);
 
         // 17.4. End the Render Pass.
-        vkCmdEndRenderPass(cmdBuffer);
+        vkCmdEndRenderPass(cmdBuffers[idx]);
     }
 
     // 18. End the Command Buffer recording.
+    // G.13. End all Command Buffers.
+    for (size_t idx = 0; idx < cmdBuffers.size(); idx++)
     {
-        if (vkEndCommandBuffer(cmdBuffer) != VK_SUCCESS) {
+        if (vkEndCommandBuffer(cmdBuffers[idx]) != VK_SUCCESS) {
             throw std::runtime_error("failed to record command buffer!");
         }
     }
@@ -881,57 +974,113 @@ int main(int argc, char **argv) {
     // Recording of the draw commands into the Command Buffer is done.
     // Now the Command Buffer should be sent to the GPU.
 
-    // 19. Create a Fence.
-    // This Fence will be used to synchronize between CPU and GPU.
-    // The Fence is created in an unsignaled state, thus no need to reset it.
-    VkFence fence;
+    const uint32_t imagesInFlight = 2;
+
+    // G.14. As there are multiple images now more sync objects are required.
+    // This replaces the old 19. step.
+    // imageAvailableSemaphores will store the Semaphores to check if the next image is available to draw on to.
+    std::vector<VkSemaphore> imageAvailableSemaphores;
+    // renderFinishedSemaphores will store the Semaphores to check if the image finished rendering.
+    std::vector<VkSemaphore> renderFinishedSemaphores;
+    std::vector<VkFence> swapImagesFences;
+    std::vector<VkFence> activeFences;
     {
+        imageAvailableSemaphores.resize(imagesInFlight);
+        renderFinishedSemaphores.resize(imagesInFlight);
+        activeFences.resize(imagesInFlight);
+        swapImagesFences.resize(swapImages.size(), VK_NULL_HANDLE);
+
+        VkSemaphoreCreateInfo semaphoreInfo;
+        {
+            semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+            semaphoreInfo.pNext = NULL;
+            semaphoreInfo.flags = 0;
+        }
+
         VkFenceCreateInfo fenceInfo;
         {
             fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
             fenceInfo.pNext = 0;
-            //fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-            fenceInfo.flags = 0;
+            fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;;
         }
 
-        if (vkCreateFence(device, &fenceInfo, NULL, &fence) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create synchronization objects for a frame!");
+        for (uint32_t idx = 0; idx < imagesInFlight; idx++) {
+            if (vkCreateSemaphore(device, &semaphoreInfo, NULL, &imageAvailableSemaphores[idx]) != VK_SUCCESS ||
+                vkCreateSemaphore(device, &semaphoreInfo, NULL, &renderFinishedSemaphores[idx]) != VK_SUCCESS ||
+                vkCreateFence(device, &fenceInfo, NULL, &activeFences[idx]) != VK_SUCCESS) {
+                throw std::runtime_error("failed to create synchronization objects for a frame!");
+            }
         }
-
-        //vkResetFences(device, 1, &fence);
     }
 
-    // 20. Submit the recorded Command Buffer to the Queue.
-    {
+    // G.25. Draw and Present loop.
+    // Draw and Present a series of images.
+    uint32_t activeSyncIdx = 0;
+    while (!glfwWindowShouldClose(window)) {
+        // G.25.0. Run GLFW event polling.
+        glfwPollEvents();
+
+        // G.25.1. Wait for the previous fence to "finish".
+        vkWaitForFences(device, 1, &activeFences[activeSyncIdx], VK_TRUE, UINT64_MAX);
+
+        // G.25.2. Get the next Swapchain Image Index.
+        uint32_t imageIndex;
+        vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphores[activeSyncIdx], VK_NULL_HANDLE, &imageIndex);
+
+        // G.25.3. Wait for the target image to be available.
+        if (swapImagesFences[imageIndex] != VK_NULL_HANDLE) {
+            vkWaitForFences(device, 1, &swapImagesFences[imageIndex], VK_TRUE, UINT64_MAX);
+        }
+        // Connect the current fence to the given swapchaing image.
+        swapImagesFences[imageIndex] = activeFences[activeSyncIdx];
+
+        // Configure a few sync points.
+        VkSemaphore waitSemaphores[] = { imageAvailableSemaphores[activeSyncIdx] };
+        VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+        VkSemaphore signalSemaphores[] = { renderFinishedSemaphores[activeSyncIdx] };
+
+        // G.25.4. Build the Submit info using the sync points.
         VkSubmitInfo submitInfo;
         {
             submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
             submitInfo.pNext = NULL;
-            submitInfo.waitSemaphoreCount = 0;
-            submitInfo.pWaitSemaphores = NULL;
-            submitInfo.pWaitDstStageMask = NULL;
+            submitInfo.waitSemaphoreCount = 1;
+            submitInfo.pWaitSemaphores = waitSemaphores;
+            submitInfo.pWaitDstStageMask = waitStages;
             submitInfo.commandBufferCount = 1;
-            submitInfo.pCommandBuffers = &cmdBuffer;
-            submitInfo.signalSemaphoreCount = 0;
-            submitInfo.pSignalSemaphores = NULL;
+            submitInfo.pCommandBuffers = &cmdBuffers[imageIndex];
+            submitInfo.signalSemaphoreCount = 1;
+            submitInfo.pSignalSemaphores = signalSemaphores;
         }
+
+        vkResetFences(device, 1, &activeFences[activeSyncIdx]);
 
         // A fence is provided to have a CPU side sync point.
-        if (vkQueueSubmit(queue, 1, &submitInfo, fence) != VK_SUCCESS) {
+        if (vkQueueSubmit(queue, 1, &submitInfo, activeFences[activeSyncIdx]) != VK_SUCCESS) {
             throw std::runtime_error("failed to submit command buffer!");
         }
-    }
 
-    // 21. Wait the submitted Command Buffer to finish.
-    {
-        // -1 means to wait for ever to finish.
-        if (vkWaitForFences(device, 1, &fence, VK_TRUE, -1) != VK_SUCCESS) {
-            throw std::runtime_error("failed to wait for fence!");
+        VkPresentInfoKHR presentInfo;
+        {
+            presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+            presentInfo.pNext = 0;
+            presentInfo.waitSemaphoreCount = 1;
+            presentInfo.pWaitSemaphores = signalSemaphores;
+            presentInfo.swapchainCount = 1;
+            presentInfo.pSwapchains = &swapchain;
+            presentInfo.pImageIndices = &imageIndex;
+            presentInfo.pResults = NULL;
         }
+
+        vkQueuePresentKHR(queue, &presentInfo);
+
+        activeSyncIdx = (activeSyncIdx + 1) % imagesInFlight;
+
+        // G.XX. Artificially slow down the rendering to avoid Epileptic seizure.
+        usleep((int)(0.15 * 1000000));
     }
 
     // At this point the image is rendered into the Framebuffer's attachment which is an ImageView.
-    // The ImageView is created for the "renderImage" thus the image is rendered into that.
 
     {
         // Start readback process of the rendered image.
@@ -939,7 +1088,7 @@ int main(int argc, char **argv) {
         // Note: this is the most basic process to the the image into a readeable memory.
         VkImage readableImage;
         VkDeviceMemory readableImageMemory;
-        CopyImageToLinearImage(physicalDevice, device, queue, cmdPool, renderImage, renderImageWidth, renderImageHeight, &readableImage, &readableImageMemory);
+        CopyImageToLinearImage(physicalDevice, device, queue, cmdPool, swapImages[0], renderImageWidth, renderImageHeight, &readableImage, &readableImageMemory);
 
         // 23. Get layout of the readable image (including row pitch).
         VkImageSubresource subResource;
@@ -989,17 +1138,23 @@ int main(int argc, char **argv) {
         vkDestroyImage(device, readableImage, NULL);
     }
 
-    // XX. Destroy Fence.
-    vkDestroyFence(device, fence, NULL);
+    // G.XX. Destroy Sync object.
+    for (uint32_t idx = 0; idx < imagesInFlight; idx++) {
+        vkDestroySemaphore(device, imageAvailableSemaphores[idx], NULL);
+        vkDestroySemaphore(device, renderFinishedSemaphores[idx], NULL);
+        vkDestroyFence(device, activeFences[idx], NULL);
+    }
 
-    // XX. Free Command Buffer.
-    vkFreeCommandBuffers(device, cmdPool, 1, &cmdBuffer);
+    // G.XX. Free Command Buffers.
+    vkFreeCommandBuffers(device, cmdPool, cmdBuffers.size(), cmdBuffers.data());
 
     // XX. Destroy Command Pool
     vkDestroyCommandPool(device, cmdPool, NULL);
 
-    // XX. Destory Framebuffer.
-    vkDestroyFramebuffer(device, framebuffer, NULL);
+    // G.XX. Destory Framebuffers
+    for (size_t idx = 0; idx < framebuffers.size(); idx++) {
+        vkDestroyFramebuffer(device, framebuffers[idx], NULL);
+    }
 
     // XX. Destory Pipeline.
     vkDestroyPipeline(device, pipeline, NULL);
@@ -1022,25 +1177,33 @@ int main(int argc, char **argv) {
     // XX. Destroy the Vertex Buffer.
     vkDestroyBuffer(device, vertexBuffer, NULL);
 
-    // XX. Destroy render target image view.
-    vkDestroyImageView(device, renderImageView, NULL);
+    // G.XX. Destroy swapchain image views.
+    for (size_t idx = 0; idx < swapImageViews.size(); idx++) {
+        vkDestroyImageView(device, swapImageViews[idx], NULL);
+    }
 
-    // XX. Free render target image's memory.
-    vkFreeMemory(device, renderImageMemory, NULL);
-
-    // XX. Destroy render target image.
-    vkDestroyImage(device, renderImage, NULL);
+    // G.XX. Destroy swapchain.
+    vkDestroySwapchainKHR(device, swapchain, NULL);
 
     // XX. Destroy Device
     vkDestroyDevice(device, NULL);
 
+    // G.XX. Destory Surface.
+    vkDestroySurfaceKHR(instance, surface, NULL);
+
     // XY. Destroy instance
     vkDestroyInstance(instance, NULL);
+
+    // G.XX. Destory GLFW Window.
+    glfwDestroyWindow(window);
+
+    // G.XX. Cleanup GLFW.
+    glfwTerminate();
 
     return 0;
 }
 
-static uint32_t FindQueueFamily(const VkPhysicalDevice device, bool *hasIdx) {
+static uint32_t FindQueueFamily(const VkPhysicalDevice device, const VkSurfaceKHR surface, bool *hasIdx) {
     if (hasIdx != nullptr) {
         *hasIdx = false;
     }
@@ -1058,7 +1221,15 @@ static uint32_t FindQueueFamily(const VkPhysicalDevice device, bool *hasIdx) {
                 *hasIdx = true;
             }
 
-            return queueFamilyIdx;
+            // G.XX. Check if the selected graphics queue family supports presentation.
+            // At the moment the example expects that the graphics and presentation queue is the same.
+            // This is not always the case.
+            // TODO: add support for different graphics and presentation family indices.
+            VkBool32 presentSupport;
+            vkGetPhysicalDeviceSurfaceSupportKHR(device, queueFamilyIdx, surface, &presentSupport);
+            if (presentSupport) {
+                return queueFamilyIdx;
+            }
         }
 
         // TODO?: check if device supports the target surface
@@ -1262,7 +1433,7 @@ void CopyImageToLinearImage(const VkPhysicalDevice physicalDevice,
             imageMemoryBarrier.pNext = NULL;
             imageMemoryBarrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
             imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-            imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; //VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
             imageMemoryBarrier.srcQueueFamilyIndex = 0;
             imageMemoryBarrier.dstQueueFamilyIndex = 0;
