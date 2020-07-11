@@ -16,8 +16,8 @@
  * Compile with shaderc:
  * $ g++ vktriangle_vertex.cpp -o triangle_vertex -lvulkan -lshaderc_shared -std=c++11 -DHAVE_SHADERC=1
  *
- * Run: the "triangle.vert*" and "passthrough.frag*" must be in the same dir.
- * $ ./triangle
+ * Run: the "passthrough.{vert,frag}*" files must be in the same dir.
+ * $ ./triangle_vertex
  *
  * Env variables:
  * DEMO_USE_VALIDATION: Enables (1) or disables (0) the usage of validation layers. Default: 0
