@@ -1,23 +1,23 @@
 /**
- * Single file Vulkan triangle example with GLFW.
- * The example renders in memory then copies it to a "readable" image and
- * saves the result into a binary PPM image file.
+ * Single file Vulkan triangle example using descriptor with GLFW.
+ * The example renders into a swapchain image(s) using descriptors and
+ * vertex buffer. In addtion one of the swapchain image is saved to a PPM file.
  *
  * The example uses a single vertex input.
- * Look for the "V.X." comments to see the vertex input handling ("X" is a number).
+ * Look for the "D.X." comments to see the descriptor handling ("X" is a number).
  *
  * Compile without shaderc:
- * $ g++ vktriangle_glfw.cpp -o triangle_glfw -lvulkan -lglfw -std=c++11
+ * $ g++ vktriangle_descriptor.cpp -o triangle_descriptor -lvulkan -lglfw -std=c++11
  *
  * Re-Compile shaders (optional):
  * $ glslangValidator -V passthrough.vert -o passthrough.vert.spv
  * $ glslangValidator -V passthrough.frag -o passthrough.frag.spv
  *
  * Compile with shaderc:
- * $ g++ vktriangle_glfw.cpp -o triangle_glfw -lvulkan -lglfw -lshaderc_shared -std=c++11 -DHAVE_SHADERC=1
+ * $ g++ vktriangle_descriptor.cpp -o triangle_descriptor -lvulkan -lglfw -lshaderc_shared -std=c++11 -DHAVE_SHADERC=1
  *
  * Run: the "passthrough.{vert,frag}*" files must be in the same dir.
- * $ ./triangle_glfw
+ * $ ./triangle_descriptor
  *
  * Env variables:
  * DEMO_USE_VALIDATION: Enables (1) or disables (0) the usage of validation layers. Default: 0
@@ -60,6 +60,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * OFTWARE.
  */
+#include <algorithm>
 #include <fstream>
 #include <cstring>
 #include <stdexcept>
@@ -634,6 +635,193 @@ int main(int argc, char **argv) {
         }
     }
 
+    // D.1. Create a Descriptor Set Layout (aka layout on shader uniforms).
+    VkDescriptorSetLayout descriptorSetLayout;
+    {
+        VkDescriptorSetLayoutBinding bindings[] =
+        {
+            {
+                0,                                                          // binding
+                VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,                          // descriptorType
+                1,                                                          // descriptorCount
+                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,  // stageFlags
+                NULL                                                        // pImmutableSamplers
+            }
+        };
+
+        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo;
+        {
+            descriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+            descriptorSetLayoutInfo.pNext = NULL;
+            descriptorSetLayoutInfo.flags = 0;
+            descriptorSetLayoutInfo.bindingCount = 1;
+            descriptorSetLayoutInfo.pBindings = bindings;
+        }
+
+        if (vkCreateDescriptorSetLayout(device, &descriptorSetLayoutInfo, NULL, &descriptorSetLayout) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create descriptor set layout!");
+        }
+    }
+
+    // D.2. Create the Descriptor Pool.
+    // A Descriptor Pool is a "storage" for Descriptor to allocate from.
+    VkDescriptorPool descriptorPool;
+    {
+        // D.2.1. Define size for single Uniform Buffer.
+        VkDescriptorPoolSize poolSizes[] =
+        {
+            {
+                VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // type
+                1,                                 // descriptorCount
+            }
+        };
+
+        VkDescriptorPoolCreateInfo poolInfo;
+        {
+            poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+            poolInfo.pNext = NULL;
+            poolInfo.flags = 0;     // VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT ??
+            poolInfo.maxSets = 1;
+            poolInfo.poolSizeCount = 1;
+            poolInfo.pPoolSizes = poolSizes;
+        }
+
+        if (vkCreateDescriptorPool(device, &poolInfo, NULL, &descriptorPool) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create descriptor pool!");
+        }
+    }
+
+    // D.3. Allocate a Descriptor Set from the Descriptor Pool.
+    VkDescriptorSet descriptorSet;
+    {
+        VkDescriptorSetAllocateInfo allocInfo;
+        {
+            allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            allocInfo.pNext = NULL;
+            allocInfo.descriptorPool = descriptorPool;
+            allocInfo.descriptorSetCount = 1;
+            allocInfo.pSetLayouts = &descriptorSetLayout;
+        }
+
+        if (vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet) != VK_SUCCESS) {
+            throw std::runtime_error("failed to allocate descriptor set!");
+        }
+    }
+
+    // D.X. Uniform Buffer data: color information.
+    std::vector<float> uniformData = {
+        1.0, 0.0, 0.0, 1.0,
+        0.0, 1.0, 0.0, 1.0,
+        0.0, 0.0, 1.0, 1.0
+    };
+
+    // D.5. Create a Buffer of the Uniform data.
+    VkBuffer uniformBuffer;
+    {
+        VkBufferCreateInfo bufferInfo;
+        {
+            bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            bufferInfo.pNext = NULL;
+            bufferInfo.flags = 0;
+            // Make the buffer vec4 size.
+            bufferInfo.size = sizeof(float) * uniformData.size();
+            // The buffer will be used as an Uniform Buffer.
+            bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+            bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            bufferInfo.queueFamilyIndexCount = 0;
+            bufferInfo.pQueueFamilyIndices = NULL;
+        }
+
+        if (vkCreateBuffer(device, &bufferInfo, NULL, &uniformBuffer) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create vertex buffer!");
+        }
+    }
+
+    // D.6. Allocate memory for the Uniform Buffer.
+    VkDeviceMemory uniformBufferMemory;
+    {
+        // D.6.1 Query the memory requirments for the buffer.
+        VkMemoryRequirements memRequirements;
+        vkGetBufferMemoryRequirements(device, uniformBuffer, &memRequirements);
+
+        // D.6.2 Find a memory type based on the requirements.
+        // Here a device (gpu) local memory type is requested.
+        uint32_t memoryTypeIndex = FindMemoryType(physicalDevice,
+                                                  memRequirements.memoryTypeBits,
+                                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+
+        // D.6.3. Based on the memory requirements specify the allocation information.
+        VkMemoryAllocateInfo allocInfo;
+        {
+            allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            allocInfo.pNext = NULL;
+            allocInfo.allocationSize = memRequirements.size;
+            allocInfo.memoryTypeIndex = memoryTypeIndex;
+        }
+
+        // D.6.3 Allocate the memory.
+        if (vkAllocateMemory(device, &allocInfo, NULL, &uniformBufferMemory) != VK_SUCCESS) {
+            throw std::runtime_error("failed to allocate image memory!");
+        }
+
+        // D.6.4 "Connect" the Unifor Buffer with the allocated memory.
+        vkBindBufferMemory(device, uniformBuffer, uniformBufferMemory, 0);
+    }
+
+    // D.7. Upload the Uniform Buffer data.
+    {
+        // D.7.1. Map buffer memory to "data" pointer.
+        void *data;
+        if (vkMapMemory(device, uniformBufferMemory, 0, VK_WHOLE_SIZE, 0, &data) != VK_SUCCESS) {
+            throw std::runtime_error("failed to map uniform buffer!");
+        }
+
+        // D.7.2. Copy data into the "data".
+        ::memcpy(data, uniformData.data(), sizeof(float) * uniformData.size());
+
+        // D.7.3. Flush the data.
+        // This is required as a non-coherent buffer was created.
+        VkMappedMemoryRange memoryRange;
+        {
+            memoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+            memoryRange.pNext = NULL;
+            memoryRange.memory = uniformBufferMemory;
+            memoryRange.offset = 0;
+            memoryRange.size = VK_WHOLE_SIZE;
+        }
+        vkFlushMappedMemoryRanges(device, 1, &memoryRange);
+
+        // D.7.4. Unmap the mapped uniform buffer.
+        // After this the "data" pointer is a non-valid pointer.
+        vkUnmapMemory(device, uniformBufferMemory);
+    }
+
+    // D.8. Update Descriptor Set contents.
+    {
+        VkDescriptorBufferInfo bufferInfo;
+        {
+            bufferInfo.buffer = uniformBuffer;
+            bufferInfo.offset = 0;
+            bufferInfo.range = VK_WHOLE_SIZE;
+        }
+
+        VkWriteDescriptorSet descriptorWrite;
+        {
+            descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrite.pNext = NULL;
+            descriptorWrite.dstSet = descriptorSet;
+            descriptorWrite.dstBinding = 0;
+            descriptorWrite.dstArrayElement = 0;
+            descriptorWrite.descriptorCount = 1;
+            descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrite.pImageInfo = NULL;
+            descriptorWrite.pBufferInfo = &bufferInfo;
+            descriptorWrite.pTexelBufferView = NULL;
+        }
+
+        vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, NULL);
+    }
+
     // 11. Create Pipeline Layout.
     // Currently there are no descriptors added (no uniforms).
     VkPipelineLayout pipelineLayout;
@@ -643,8 +831,9 @@ int main(int argc, char **argv) {
             pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
             pipelineLayoutInfo.pNext = NULL;
             pipelineLayoutInfo.flags = 0;
-            pipelineLayoutInfo.setLayoutCount = 0;
-            pipelineLayoutInfo.pSetLayouts = NULL;
+            // D.X. Connect the created Desctiptor Set Layout to the pipeline layout.
+            pipelineLayoutInfo.setLayoutCount = 1;
+            pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
             pipelineLayoutInfo.pushConstantRangeCount = 0;
         }
 
@@ -946,6 +1135,9 @@ int main(int argc, char **argv) {
         // 17.2. Bind the Graphics pipeline inside the Current Render Pass.
         vkCmdBindPipeline(cmdBuffers[idx], VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
+        // D.X. Bind descriptor set
+        vkCmdBindDescriptorSets(cmdBuffers[idx], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, NULL);
+
         // V.7. Bind the Vertex buffers as specified by the pipeline.
         VkDeviceSize bufferOffsets[] = { 0 };
         vkCmdBindVertexBuffers(cmdBuffers[idx], 0, 1, &vertexBuffer, bufferOffsets);
@@ -954,9 +1146,9 @@ int main(int argc, char **argv) {
         // Draw 3 vertices using the pipeline bound previously.
         uint32_t vertexCount = 3;
         uint32_t instanceCount = 1;
-        // G.XX. Each Command buffer uses a different starting Instance Index (idx).
-        // This will be used in the shader to provide a bit of animation.
-        vkCmdDraw(cmdBuffers[idx], vertexCount, instanceCount, 0, idx);
+
+        // D.XX. Only render a single instance (color "rotation" is done in a different way).
+        vkCmdDraw(cmdBuffers[idx], vertexCount, instanceCount, 0, 0);
 
         // 17.4. End the Render Pass.
         vkCmdEndRenderPass(cmdBuffers[idx]);
@@ -1019,6 +1211,38 @@ int main(int argc, char **argv) {
     while (!glfwWindowShouldClose(window)) {
         // G.25.0. Run GLFW event polling.
         glfwPollEvents();
+
+        // D.X. Update the Uniform Buffer data in each frame.
+        {
+            // D.X.1. Map buffer memory to "data" pointer.
+            void *data;
+            if (vkMapMemory(device, uniformBufferMemory, 0, VK_WHOLE_SIZE, 0, &data) != VK_SUCCESS) {
+                throw std::runtime_error("failed to map uniform buffer!");
+            }
+
+            // D.X.2. Change the uniform data.
+            // Rotate the data by 4 floats.
+            std::rotate(uniformData.begin(), uniformData.begin() + 4, uniformData.end());
+
+            // D.X.3. Copy data into the "data".
+            ::memcpy(data, uniformData.data(), sizeof(float) * uniformData.size());
+
+            // D.X.4. Flush the data.
+            // This is required as a non-coherent buffer was created.
+            VkMappedMemoryRange memoryRange;
+            {
+                memoryRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+                memoryRange.pNext = NULL;
+                memoryRange.memory = uniformBufferMemory;
+                memoryRange.offset = 0;
+                memoryRange.size = VK_WHOLE_SIZE;
+            }
+            vkFlushMappedMemoryRanges(device, 1, &memoryRange);
+
+            // D.X.5. Unmap the mapped uniform buffer.
+            // After this the "data" pointer is a non-valid pointer.
+            vkUnmapMemory(device, uniformBufferMemory);
+        }
 
         // G.25.1. Wait for the previous fence to "finish".
         vkWaitForFences(device, 1, &activeFences[activeSyncIdx], VK_TRUE, UINT64_MAX);
@@ -1167,6 +1391,21 @@ int main(int argc, char **argv) {
 
     // XX. Destory Pipeline Layout.
     vkDestroyPipelineLayout(device, pipelineLayout, NULL);
+
+    // D.XX. Free Uniform Buffer memory.
+    vkFreeMemory(device, uniformBufferMemory, NULL);
+
+    // D.XX. Destroy Uniform Buffer.
+    vkDestroyBuffer(device, uniformBuffer, NULL);
+
+    // D.XX. Free Descriptor Set.
+    vkResetDescriptorPool(device, descriptorPool, 0);
+
+    // D.XX. Destroy Descriptor Pool.
+    vkDestroyDescriptorPool(device, descriptorPool, NULL);
+
+    // D.XX. Destroy Descriptor Set Layout.
+    vkDestroyDescriptorSetLayout(device, descriptorSetLayout, NULL);
 
     // XX. Destory Render Pass.
     vkDestroyRenderPass(device, renderPass, NULL);
