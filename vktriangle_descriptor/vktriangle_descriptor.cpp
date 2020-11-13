@@ -133,13 +133,15 @@ int main(int argc, char **argv) {
     }
 
     // G.1. Create a Window.
+    uint32_t windowWidth = 512;
+    uint32_t windowHeight = 512;
     GLFWwindow* window;
     {
         // With GLFW_CLIENT_API set to GLFW_NO_API there will be no OpenGL (ES) context.
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
-        window = glfwCreateWindow(512, 512, "vktriangle GLFW", NULL, NULL);
+        window = glfwCreateWindow(windowWidth, windowHeight, "vktriangle GLFW", NULL, NULL);
     }
 
     // 1. Create Vulkan Instance.
@@ -302,7 +304,7 @@ int main(int argc, char **argv) {
     VkSurfaceFormatKHR surfaceFormat;
     // By standard the FIFO presentation mode should always be available.
     VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
-    VkExtent2D swapExtent;
+    VkExtent2D swapExtent = { windowWidth, windowHeight };
 
     VkSwapchainKHR swapchain;
     {
@@ -311,11 +313,9 @@ int main(int argc, char **argv) {
         {
             vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCapabilities);
 
-            if (surfaceCapabilities.currentExtent.width == UINT32_MAX) {
-                throw std::runtime_error("surface current extent is special, handling int is not implemented!");
+            if (surfaceCapabilities.currentExtent.width != UINT32_MAX) {
+                swapExtent = surfaceCapabilities.currentExtent;
             }
-
-            swapExtent = surfaceCapabilities.currentExtent;
         }
 
         // G.5.2. Select a surface format.
