@@ -30,3 +30,9 @@ and also saves a frame to a ppm image (with minimal "helper" methods).
 See start of the [vktriangle_descriptor.cpp](vktriangle_descriptor/vktriangle_descriptor.cpp) file on details how to compile and run.
 
 Compare to the previous one to see the differences.
+
+## vktriangle_subpass
+
+Draws a triangle using a multiple subpasses on screen with GLFW.
+
+See start of the [vktriangle_subpass.cpp](vktriangle_subpass/vktriangle_subpass.cpp) file on details how to compile and run.
