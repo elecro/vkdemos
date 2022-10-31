@@ -128,6 +128,7 @@ int main(int argc, char **argv) {
         VkApplicationInfo appInfo;
         {
             appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+            appInfo.pNext = NULL;
             appInfo.pApplicationName = "MinimalVkTriangle";
             appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
             appInfo.pEngineName = "RAW";
