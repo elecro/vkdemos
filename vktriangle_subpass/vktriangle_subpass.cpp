@@ -69,7 +69,9 @@
 #include <cstring>
 #include <stdexcept>
 #include <vector>
+#include <libgen.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include <vulkan/vulkan.h>
 
@@ -697,11 +699,16 @@ int main(int argc, char **argv) {
         }
     }
 
-    VkShaderModule shaderColorizerVert = BuildShader(device, "passthrough.vert", VK_SHADER_STAGE_VERTEX_BIT);
-    VkShaderModule shaderColorizerFrag = BuildShader(device, "subpass_0_colorizer.frag", VK_SHADER_STAGE_FRAGMENT_BIT);
+    char binaryPath[PATH_MAX];
+    ssize_t count = readlink("/proc/self/exe", binaryPath, PATH_MAX);
+    char *binaryDir = dirname(binaryPath);
+    std::string sourceDir = std::string(binaryDir);
 
-    VkShaderModule shaderComposeVert = BuildShader(device, "subpass_2_compose.vert", VK_SHADER_STAGE_VERTEX_BIT);
-    VkShaderModule shaderComposeFrag = BuildShader(device, "subpass_2_compose.frag", VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkShaderModule shaderColorizerVert = BuildShader(device, sourceDir + "/passthrough.vert", VK_SHADER_STAGE_VERTEX_BIT);
+    VkShaderModule shaderColorizerFrag = BuildShader(device, sourceDir + "/subpass_0_colorizer.frag", VK_SHADER_STAGE_FRAGMENT_BIT);
+
+    VkShaderModule shaderComposeVert = BuildShader(device, sourceDir + "/subpass_2_compose.vert", VK_SHADER_STAGE_VERTEX_BIT);
+    VkShaderModule shaderComposeFrag = BuildShader(device, sourceDir + "/subpass_2_compose.frag", VK_SHADER_STAGE_FRAGMENT_BIT);
 
     // D.1. Create a Descriptor Set Layout (aka layout on shader uniforms).
     VkDescriptorSetLayout descriptorSetLayout;
