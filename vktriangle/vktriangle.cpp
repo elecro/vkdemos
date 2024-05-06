@@ -123,8 +123,17 @@ int main(int argc, char **argv) {
     {
         std::vector<const char*> extensions{};
 
-        // 1.1. Specify the application infromation.
+        // 1.1. Specify the application information.
         // One important info is the "apiVersion"
+        /*
+          VkApplicationInfo structure is used to indicate application information which
+          can be used by the underlying driver.
+
+          For the most parts there are no required informations, users/developers can
+          specify their own pApplicationName, applicationVersion, pEngineName, and engineVersion.
+          The apiVersion is used to requires a given Vulkan version from the driver.
+          If a VK_API_VERSION_1_0 is required the driver must return an 1.0 "Instance".
+        */
         VkApplicationInfo appInfo;
         {
             appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -133,11 +142,24 @@ int main(int argc, char **argv) {
             appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
             appInfo.pEngineName = "RAW";
             appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-            appInfo.apiVersion = VK_API_VERSION_1_0;
+            appInfo.apiVersion = VK_API_VERSION_1_1;
         }
 
         // 1.2. Specify the Instance creation information.
         // The Instance level Validation and debug layers must be specified here.
+        /*
+          VkInstanceCreateInfo is required to create a Vulkan instance in which
+          any other Vulkan operation is done (This is similar to the OpenGL context).
+
+          The pApplicationInfo is an optional argument, if it is a NULL pointer a default app Info is used.
+          Layers are used to track/modify/extend existing Vulkan API calls.
+          For example: the "VK_LAYER_KHRONOS_validation" is used to provide information on invalid
+            API calls and structure configuration(s).
+
+          Extensions are used to add extra API methods and to use any it must be specified
+          otherwise it is not usable.
+          For example: to have a presenting surface a KHR_surface extension is required.
+        */
         VkInstanceCreateInfo createInfo;
         {
             createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -167,10 +189,21 @@ int main(int argc, char **argv) {
     }
 
     // 2. Select PhysicalDevice and Queue Family Index.
+    /*
+      A VkPhysicalDevice is required to do any rendering/computing.
+
+      Selecting a VkPhysicalDevice is an application dependent process.
+      In this case the first device is selected which has a "Graphics" queue.
+      The Queue index is also used later do submit rendering jobs.
+    */
     VkPhysicalDevice physicalDevice;
     uint32_t graphicsQueueFamilyIdx;
     {
         // 2.1 Query the number of physical devices.
+        /*
+          By providing vkEnumeratePhysicalDevices a null value as the third argument,
+          the number of VkPhysicalDevice can be queried.
+        */
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
 
@@ -179,6 +212,10 @@ int main(int argc, char **argv) {
         }
 
         // 2.2. Get all avaliable physical devices.
+        /*
+          By providing the third argument the VkPhysicalDevice will be stored
+          in the array.
+        */
         std::vector<VkPhysicalDevice> devices(deviceCount);
         vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
 
