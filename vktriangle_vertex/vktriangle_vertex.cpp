@@ -63,6 +63,9 @@
 #include <cstring>
 #include <stdexcept>
 #include <vector>
+#include <libgen.h>
+#include <unistd.h>
+#include <limits.h>
 
 #include <vulkan/vulkan.h>
 
@@ -497,15 +500,20 @@ int main(int argc, char **argv) {
         }
     }
 
+    char binaryPath[PATH_MAX];
+    ssize_t count = readlink("/proc/self/exe", binaryPath, PATH_MAX);
+    char *binaryDir = dirname(binaryPath);
+    std::string sourceDir = std::string(binaryDir);
+
     // 9. Create Vertex shader.
     VkShaderModule vertShaderModule;
     {
         // 9.1. Load the GLSL shader from file and compile it with shaderc.
         #if HAVE_SHADERC
-        std::vector<char> vertSrc = LoadGLSL("passthrough.vert");
+        std::vector<char> vertSrc = LoadGLSL(sourceDir + "/passthrough.vert");
         std::vector<uint32_t> vertCode = CompileGLSL(shaderc_vertex_shader, vertSrc);
         #else
-        std::vector<uint32_t> vertCode = LoadSPIRV("passthrough.vert.spv");
+        std::vector<uint32_t> vertCode = LoadSPIRV(sourceDir + "/passthrough.vert.spv");
         #endif
 
         if (vertCode.size() == 0) {
@@ -536,10 +544,10 @@ int main(int argc, char **argv) {
     {
         // 10.1. Load the GLSL shader from file and compile it with shaderc.
         #if HAVE_SHADERC
-        std::vector<char> fragSrc = LoadGLSL("passthrough.frag");
+        std::vector<char> fragSrc = LoadGLSL(sourceDir + "/passthrough.frag");
         std::vector<uint32_t> fragCode = CompileGLSL(shaderc_fragment_shader, fragSrc);
         #else
-        std::vector<uint32_t> fragCode = LoadSPIRV("passthrough.frag.spv");
+        std::vector<uint32_t> fragCode = LoadSPIRV(sourceDir + "/passthrough.frag.spv");
         #endif
 
         if (fragCode.size() == 0) {
